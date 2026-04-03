@@ -1,6 +1,17 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Icon from "@/components/ui/icon";
 import { Input } from "@/components/ui/input";
+
+const AVITO_AUTH_URL = "https://functions.poehali.dev/9f643d6b-b87f-4d31-9588-03067993ba01";
+
+interface AuthStatus {
+  connected: boolean;
+  token_preview?: string;
+  expires_at?: string;
+  expires_in_minutes?: number;
+  updated_at?: string;
+  message?: string;
+}
 
 type Tab = "chats" | "stats" | "sync" | "settings";
 type FilterStatus = "all" | "active" | "new" | "archived";
@@ -134,6 +145,57 @@ export default function Index() {
   const [filter, setFilter] = useState<FilterStatus>("all");
   const [search, setSearch] = useState("");
   const [newMessage, setNewMessage] = useState("");
+
+  const [clientId, setClientId] = useState("");
+  const [clientSecret, setClientSecret] = useState("");
+  const [authStatus, setAuthStatus] = useState<AuthStatus | null>(null);
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState("");
+  const [authSuccess, setAuthSuccess] = useState("");
+
+  const fetchAuthStatus = useCallback(async () => {
+    try {
+      const res = await fetch(AVITO_AUTH_URL);
+      const data = await res.json();
+      setAuthStatus(data);
+    } catch {
+      setAuthStatus(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (tab === "settings") fetchAuthStatus();
+  }, [tab, fetchAuthStatus]);
+
+  const handleConnect = async () => {
+    if (!clientId.trim() || !clientSecret.trim()) {
+      setAuthError("Введите Client ID и Client Secret");
+      return;
+    }
+    setAuthLoading(true);
+    setAuthError("");
+    setAuthSuccess("");
+    try {
+      const res = await fetch(AVITO_AUTH_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client_id: clientId.trim(), client_secret: clientSecret.trim() }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setAuthSuccess(`Подключено! Токен действует ${data.expires_in_minutes} минут`);
+        setClientId("");
+        setClientSecret("");
+        await fetchAuthStatus();
+      } else {
+        setAuthError(data.error || "Ошибка подключения");
+      }
+    } catch {
+      setAuthError("Сервер недоступен, попробуйте позже");
+    } finally {
+      setAuthLoading(false);
+    }
+  };
 
   const filteredChats = MOCK_CHATS.filter((c) => {
     const matchStatus = filter === "all" || c.status === filter;
@@ -463,26 +525,109 @@ export default function Index() {
             <p className="text-sm text-muted-foreground mb-8">Управление аккаунтом и подключением</p>
 
             <div className="space-y-4">
+
+              {/* Connection status */}
               <div className="bg-card border border-border rounded-2xl p-6">
-                <h3 className="text-sm font-semibold text-foreground mb-4">Аккаунт Avito</h3>
-                <div className="flex items-center gap-3 p-3 bg-secondary rounded-xl mb-4">
-                  <div className="w-10 h-10 rounded-full bg-foreground flex items-center justify-center text-background font-semibold">
-                    П
-                  </div>
-                  <div>
-                    <div className="text-sm font-medium text-foreground">Пользователь Avito</div>
-                    <div className="text-xs text-muted-foreground flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
-                      Подключено
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-semibold text-foreground">Подключение к Avito API</h3>
+                  {authStatus && (
+                    <span className={`text-xs px-2.5 py-1 rounded-lg flex items-center gap-1.5 ${
+                      authStatus.connected
+                        ? "bg-emerald-100 text-emerald-700"
+                        : "bg-orange-100 text-orange-700"
+                    }`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${authStatus.connected ? "bg-emerald-500" : "bg-orange-400"}`} />
+                      {authStatus.connected ? "Подключено" : "Не подключено"}
+                    </span>
+                  )}
+                </div>
+
+                {authStatus?.connected && (
+                  <div className="p-3 bg-secondary rounded-xl mb-5">
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center">
+                        <Icon name="ShieldCheck" size={16} className="text-emerald-600" />
+                      </div>
+                      <div>
+                        <div className="text-sm font-medium text-foreground">
+                          Токен: <span className="font-mono">{authStatus.token_preview}</span>
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          Действителен ещё {authStatus.expires_in_minutes} мин
+                        </div>
+                      </div>
                     </div>
                   </div>
+                )}
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1.5 block">Client ID</label>
+                    <Input
+                      placeholder="Например: a1b2c3d4e5f6..."
+                      value={clientId}
+                      onChange={(e) => { setClientId(e.target.value); setAuthError(""); setAuthSuccess(""); }}
+                      className="bg-secondary border-0 focus-visible:ring-1 text-sm font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1.5 block">Client Secret</label>
+                    <Input
+                      type="password"
+                      placeholder="Секретный ключ приложения"
+                      value={clientSecret}
+                      onChange={(e) => { setClientSecret(e.target.value); setAuthError(""); setAuthSuccess(""); }}
+                      className="bg-secondary border-0 focus-visible:ring-1 text-sm font-mono"
+                      onKeyDown={(e) => { if (e.key === "Enter") handleConnect(); }}
+                    />
+                  </div>
+
+                  {authError && (
+                    <div className="flex items-center gap-2 text-xs text-red-600 bg-red-50 px-3 py-2.5 rounded-lg">
+                      <Icon name="AlertCircle" size={13} />
+                      {authError}
+                    </div>
+                  )}
+                  {authSuccess && (
+                    <div className="flex items-center gap-2 text-xs text-emerald-700 bg-emerald-50 px-3 py-2.5 rounded-lg">
+                      <Icon name="CheckCircle" size={13} />
+                      {authSuccess}
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleConnect}
+                    disabled={authLoading}
+                    className="w-full h-9 rounded-xl bg-foreground text-background text-sm font-medium hover:opacity-80 transition-opacity disabled:opacity-40 flex items-center justify-center gap-2"
+                  >
+                    {authLoading ? (
+                      <>
+                        <Icon name="Loader" size={14} className="animate-spin" />
+                        Подключение...
+                      </>
+                    ) : (
+                      <>
+                        <Icon name="Plug" size={14} />
+                        {authStatus?.connected ? "Переподключить" : "Подключить Avito"}
+                      </>
+                    )}
+                  </button>
                 </div>
-                <button className="text-sm text-muted-foreground hover:text-foreground transition-colors flex items-center gap-2">
-                  <Icon name="Link" size={13} />
-                  Переподключить аккаунт
-                </button>
+
+                <p className="text-xs text-muted-foreground mt-4 leading-relaxed">
+                  Ключи берутся в{" "}
+                  <a
+                    href="https://www.avito.ru/professionals/api"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline hover:text-foreground transition-colors"
+                  >
+                    личном кабинете Avito → API
+                  </a>
+                </p>
               </div>
 
+              {/* Sync settings */}
               <div className="bg-card border border-border rounded-2xl p-6">
                 <h3 className="text-sm font-semibold text-foreground mb-4">Синхронизация</h3>
                 <div className="space-y-3">
@@ -510,21 +655,6 @@ export default function Index() {
                 </div>
               </div>
 
-              <div className="bg-card border border-border rounded-2xl p-6">
-                <h3 className="text-sm font-semibold text-foreground mb-1">API-токен</h3>
-                <p className="text-xs text-muted-foreground mb-4">Используется для подключения к Avito API</p>
-                <div className="flex gap-2">
-                  <Input
-                    type="password"
-                    defaultValue="avito_api_xxxxxxxxxxxxxxxx"
-                    className="flex-1 bg-secondary border-0 text-sm font-mono"
-                    readOnly
-                  />
-                  <button className="px-3 h-9 rounded-lg bg-secondary hover:bg-border text-sm text-foreground transition-colors">
-                    <Icon name="Copy" size={14} />
-                  </button>
-                </div>
-              </div>
             </div>
           </div>
         </div>

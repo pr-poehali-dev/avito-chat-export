@@ -1,0 +1,21 @@
+{
+  "tests": [
+    {
+      "name": "GET - статус подключения",
+      "method": "GET",
+      "path": "/",
+      "expectedStatus": 200,
+      "expectedBody": { "connected": false },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "POST - без credentials",
+      "method": "POST",
+      "path": "/",
+      "body": {},
+      "expectedStatus": 400,
+      "expectedBody": { "success": false },
+      "bodyMatcher": "partial"
+    }
+  ]
+}
