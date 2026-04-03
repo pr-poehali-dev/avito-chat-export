@@ -1,0 +1,21 @@
+{
+  "tests": [
+    {
+      "name": "GET messages - без chat_id возвращает 400",
+      "method": "GET",
+      "path": "/",
+      "expectedStatus": 401,
+      "expectedBody": { "error": "Токен не найден. Подключите Avito в Настройках." },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "POST send - без тела возвращает 401",
+      "method": "POST",
+      "path": "/",
+      "body": {},
+      "expectedStatus": 401,
+      "expectedBody": { "error": "Токен не найден. Подключите Avito в Настройках." },
+      "bodyMatcher": "partial"
+    }
+  ]
+}

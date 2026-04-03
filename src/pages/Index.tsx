@@ -1,8 +1,10 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Icon from "@/components/ui/icon";
 import { Input } from "@/components/ui/input";
 
 const AVITO_AUTH_URL = "https://functions.poehali.dev/9f643d6b-b87f-4d31-9588-03067993ba01";
+const AVITO_CHATS_URL = "https://functions.poehali.dev/b11d7cfc-045e-47b0-b0cd-89dec73bde14";
+const AVITO_MESSAGES_URL = "https://functions.poehali.dev/c3bc0f84-fbae-48a0-bcc6-5e791b369ea6";
 
 interface AuthStatus {
   connected: boolean;
@@ -13,138 +15,68 @@ interface AuthStatus {
   message?: string;
 }
 
+interface AvitoChat {
+  id: string;
+  user_id: number;
+  author_name: string;
+  author_id: number;
+  item_title: string;
+  item_id?: number;
+  item_url?: string;
+  last_message_text: string;
+  last_message_time: string | null;
+  unread_count: number;
+  is_new: boolean;
+}
+
+interface AvitoMessage {
+  id: string;
+  from: "me" | "them";
+  text: string;
+  time: string | null;
+  time_display: string;
+  type: string;
+}
+
 type Tab = "chats" | "stats" | "sync" | "settings";
-type FilterStatus = "all" | "active" | "new" | "archived";
-
-const MOCK_CHATS = [
-  {
-    id: 1,
-    name: "Алексей Петров",
-    item: "iPhone 14 Pro, 128GB",
-    lastMsg: "Можно ли договориться о цене?",
-    time: "14:32",
-    unread: 3,
-    status: "new",
-    avatar: "А",
-    avgResponseTime: "12 мин",
-  },
-  {
-    id: 2,
-    name: "Мария Сидорова",
-    item: "MacBook Air M2",
-    lastMsg: "Хорошо, завтра подъеду",
-    time: "13:15",
-    unread: 0,
-    status: "active",
-    avatar: "М",
-    avgResponseTime: "5 мин",
-  },
-  {
-    id: 3,
-    name: "Дмитрий Козлов",
-    item: "Sony PlayStation 5",
-    lastMsg: "Готов забрать сегодня вечером",
-    time: "11:48",
-    unread: 1,
-    status: "active",
-    avatar: "Д",
-    avgResponseTime: "28 мин",
-  },
-  {
-    id: 4,
-    name: "Анна Белова",
-    item: "Диван угловой, серый",
-    lastMsg: "Спасибо, уже нашла другой вариант",
-    time: "Вчера",
-    unread: 0,
-    status: "archived",
-    avatar: "А",
-    avgResponseTime: "45 мин",
-  },
-  {
-    id: 5,
-    name: "Сергей Новиков",
-    item: "Велосипед горный Trek",
-    lastMsg: "Какой пробег?",
-    time: "Вчера",
-    unread: 2,
-    status: "new",
-    avatar: "С",
-    avgResponseTime: "8 мин",
-  },
-  {
-    id: 6,
-    name: "Елена Волкова",
-    item: "Холодильник Samsung",
-    lastMsg: "Доставка включена?",
-    time: "2 дня",
-    unread: 0,
-    status: "active",
-    avatar: "Е",
-    avgResponseTime: "15 мин",
-  },
-];
-
-const MOCK_MESSAGES: Record<number, { from: "me" | "them"; text: string; time: string }[]> = {
-  1: [
-    { from: "them", text: "Добрый день! Интересует iPhone 14 Pro.", time: "14:20" },
-    { from: "me", text: "Здравствуйте! Да, телефон ещё доступен.", time: "14:25" },
-    { from: "them", text: "Можно ли договориться о цене?", time: "14:32" },
-  ],
-  2: [
-    { from: "them", text: "Привет, MacBook ещё продаётся?", time: "12:50" },
-    { from: "me", text: "Да, приходите смотреть!", time: "12:55" },
-    { from: "them", text: "Хорошо, завтра подъеду", time: "13:15" },
-  ],
-  3: [
-    { from: "them", text: "Здравствуйте, PS5 в наличии?", time: "11:30" },
-    { from: "me", text: "Да, новая в упаковке.", time: "11:40" },
-    { from: "them", text: "Готов забрать сегодня вечером", time: "11:48" },
-  ],
-  4: [
-    { from: "them", text: "Диван ещё актуален?", time: "Вчера" },
-    { from: "me", text: "Да, приходите смотреть.", time: "Вчера" },
-    { from: "them", text: "Спасибо, уже нашла другой вариант", time: "Вчера" },
-  ],
-  5: [
-    { from: "them", text: "Добрый день! Велосипед ещё доступен?", time: "Вчера" },
-    { from: "me", text: "Да, всё в порядке!", time: "Вчера" },
-    { from: "them", text: "Какой пробег?", time: "Вчера" },
-  ],
-  6: [
-    { from: "them", text: "Холодильник продаёте?", time: "2 дня" },
-    { from: "me", text: "Да, в отличном состоянии.", time: "2 дня" },
-    { from: "them", text: "Доставка включена?", time: "2 дня" },
-  ],
-};
+type FilterStatus = "all" | "new" | "read";
 
 const SYNC_LOGS = [
-  { id: 1, time: "14:35", event: "Синхронизация завершена", status: "ok", count: 3 },
-  { id: 2, time: "14:05", event: "Получено новых сообщений", status: "ok", count: 7 },
-  { id: 3, time: "13:30", event: "Синхронизация завершена", status: "ok", count: 0 },
-  { id: 4, time: "12:00", event: "Ошибка соединения с Avito API", status: "error", count: 0 },
-  { id: 5, time: "11:30", event: "Синхронизация завершена", status: "ok", count: 12 },
+  { id: 1, time: "только что", event: "Синхронизация чатов", status: "ok", count: 0 },
 ];
 
-const STATUS_LABELS: Record<string, string> = {
-  all: "Все",
-  active: "Активные",
-  new: "Новые",
-  archived: "Архив",
-};
+function formatTime(isoString: string | null): string {
+  if (!isoString) return "";
+  const d = new Date(isoString);
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffDays = Math.floor(diffMs / 86400000);
+  if (diffDays === 0) return d.toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" });
+  if (diffDays === 1) return "Вчера";
+  if (diffDays < 7) return `${diffDays} дн.`;
+  return d.toLocaleDateString("ru", { day: "numeric", month: "short" });
+}
 
-const STATUS_COLORS: Record<string, string> = {
-  active: "bg-emerald-100 text-emerald-700",
-  new: "bg-orange-100 text-orange-700",
-  archived: "bg-gray-100 text-gray-500",
-};
+function avatarLetter(name: string): string {
+  return (name || "?")[0].toUpperCase();
+}
 
 export default function Index() {
   const [tab, setTab] = useState<Tab>("chats");
-  const [selectedChat, setSelectedChat] = useState<number | null>(1);
   const [filter, setFilter] = useState<FilterStatus>("all");
   const [search, setSearch] = useState("");
   const [newMessage, setNewMessage] = useState("");
+
+  const [chats, setChats] = useState<AvitoChat[]>([]);
+  const [chatsLoading, setChatsLoading] = useState(false);
+  const [chatsError, setChatsError] = useState("");
+  const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
+
+  const [messages, setMessages] = useState<AvitoMessage[]>([]);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [sendingMessage, setSendingMessage] = useState(false);
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
@@ -163,9 +95,60 @@ export default function Index() {
     }
   }, []);
 
+  const fetchChats = useCallback(async () => {
+    setChatsLoading(true);
+    setChatsError("");
+    try {
+      const res = await fetch(AVITO_CHATS_URL);
+      const data = await res.json();
+      if (!res.ok) {
+        setChatsError(data.error || "Ошибка загрузки чатов");
+        setChats([]);
+      } else {
+        setChats(data.chats || []);
+        if (data.chats?.length > 0 && !selectedChatId) {
+          setSelectedChatId(data.chats[0].id);
+        }
+      }
+    } catch {
+      setChatsError("Не удалось загрузить чаты");
+    } finally {
+      setChatsLoading(false);
+    }
+  }, [selectedChatId]);
+
+  const fetchMessages = useCallback(async (chatId: string) => {
+    setMessagesLoading(true);
+    try {
+      const res = await fetch(`${AVITO_MESSAGES_URL}?chat_id=${chatId}`);
+      const data = await res.json();
+      if (res.ok) {
+        setMessages(data.messages || []);
+      } else {
+        setMessages([]);
+      }
+    } catch {
+      setMessages([]);
+    } finally {
+      setMessagesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (tab === "chats") fetchChats();
+  }, [tab]);
+
   useEffect(() => {
     if (tab === "settings") fetchAuthStatus();
   }, [tab, fetchAuthStatus]);
+
+  useEffect(() => {
+    if (selectedChatId) fetchMessages(selectedChatId);
+  }, [selectedChatId, fetchMessages]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   const handleConnect = async () => {
     if (!clientId.trim() || !clientSecret.trim()) {
@@ -197,18 +180,52 @@ export default function Index() {
     }
   };
 
-  const filteredChats = MOCK_CHATS.filter((c) => {
-    const matchStatus = filter === "all" || c.status === filter;
+  const handleSendMessage = async () => {
+    if (!newMessage.trim() || !selectedChatId || sendingMessage) return;
+    const text = newMessage.trim();
+    setNewMessage("");
+    setSendingMessage(true);
+
+    const optimistic: AvitoMessage = {
+      id: `opt-${Date.now()}`,
+      from: "me",
+      text,
+      time: new Date().toISOString(),
+      time_display: new Date().toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" }),
+      type: "text",
+    };
+    setMessages((prev) => [...prev, optimistic]);
+
+    try {
+      const res = await fetch(AVITO_MESSAGES_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: selectedChatId, message: text }),
+      });
+      if (res.ok) {
+        setTimeout(() => fetchMessages(selectedChatId), 1000);
+      }
+    } catch {
+      setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
+    } finally {
+      setSendingMessage(false);
+    }
+  };
+
+  const filteredChats = chats.filter((c) => {
+    const matchStatus =
+      filter === "all" ||
+      (filter === "new" && c.is_new) ||
+      (filter === "read" && !c.is_new);
     const matchSearch =
       search === "" ||
-      c.name.toLowerCase().includes(search.toLowerCase()) ||
-      c.item.toLowerCase().includes(search.toLowerCase()) ||
-      c.lastMsg.toLowerCase().includes(search.toLowerCase());
+      c.author_name.toLowerCase().includes(search.toLowerCase()) ||
+      c.item_title.toLowerCase().includes(search.toLowerCase()) ||
+      c.last_message_text.toLowerCase().includes(search.toLowerCase());
     return matchStatus && matchSearch;
   });
 
-  const activeChat = MOCK_CHATS.find((c) => c.id === selectedChat);
-  const messages = selectedChat ? MOCK_MESSAGES[selectedChat] || [] : [];
+  const activeChat = chats.find((c) => c.id === selectedChatId);
 
   const navItems: { id: Tab; icon: string; label: string }[] = [
     { id: "chats", icon: "MessageSquare", label: "Чаты" },
@@ -216,6 +233,14 @@ export default function Index() {
     { id: "sync", icon: "RefreshCw", label: "История" },
     { id: "settings", icon: "Settings", label: "Настройки" },
   ];
+
+  const STATUS_LABELS: Record<FilterStatus, string> = {
+    all: "Все",
+    new: "Непрочитанные",
+    read: "Прочитанные",
+  };
+
+  const totalUnread = chats.reduce((a, c) => a + c.unread_count, 0);
 
   return (
     <div className="flex h-screen bg-background overflow-hidden" style={{ fontFamily: "'Golos Text', sans-serif" }}>
@@ -230,7 +255,7 @@ export default function Index() {
           <button
             key={item.id}
             onClick={() => setTab(item.id)}
-            className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-150 ${
+            className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-150 relative ${
               tab === item.id
                 ? "bg-foreground text-background"
                 : "text-muted-foreground hover:bg-secondary hover:text-foreground"
@@ -238,6 +263,11 @@ export default function Index() {
             title={item.label}
           >
             <Icon name={item.icon} fallback="Circle" size={18} />
+            {item.id === "chats" && totalUnread > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-orange-500 text-white text-[8px] flex items-center justify-center">
+                {totalUnread > 9 ? "9+" : totalUnread}
+              </span>
+            )}
           </button>
         ))}
       </nav>
@@ -250,9 +280,21 @@ export default function Index() {
             <div className="px-4 pt-5 pb-4 border-b border-border">
               <div className="flex items-center justify-between mb-4">
                 <h1 className="text-base font-semibold text-foreground">Переписки</h1>
-                <span className="text-xs text-muted-foreground bg-secondary px-2 py-0.5 rounded-full">
-                  {MOCK_CHATS.reduce((a, c) => a + c.unread, 0)} новых
-                </span>
+                <div className="flex items-center gap-2">
+                  {totalUnread > 0 && (
+                    <span className="text-xs text-orange-700 bg-orange-100 px-2 py-0.5 rounded-full">
+                      {totalUnread} новых
+                    </span>
+                  )}
+                  <button
+                    onClick={fetchChats}
+                    disabled={chatsLoading}
+                    className="w-7 h-7 rounded-lg hover:bg-secondary flex items-center justify-center text-muted-foreground transition-colors"
+                    title="Обновить"
+                  >
+                    <Icon name="RefreshCw" size={13} className={chatsLoading ? "animate-spin" : ""} />
+                  </button>
+                </div>
               </div>
               <div className="relative mb-3">
                 <Icon name="Search" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -264,7 +306,7 @@ export default function Index() {
                 />
               </div>
               <div className="flex gap-1 flex-wrap">
-                {(["all", "new", "active", "archived"] as FilterStatus[]).map((f) => (
+                {(["all", "new", "read"] as FilterStatus[]).map((f) => (
                   <button
                     key={f}
                     onClick={() => setFilter(f)}
@@ -281,35 +323,57 @@ export default function Index() {
             </div>
 
             <div className="flex-1 overflow-y-auto scrollbar-thin py-2">
-              {filteredChats.length === 0 ? (
+              {chatsLoading ? (
+                <div className="flex flex-col items-center justify-center h-32 text-muted-foreground text-sm">
+                  <Icon name="Loader" size={24} className="mb-2 animate-spin opacity-40" />
+                  Загружаю чаты...
+                </div>
+              ) : chatsError ? (
+                <div className="flex flex-col items-center justify-center h-40 px-4 text-center">
+                  <Icon name="WifiOff" size={28} className="mb-2 text-muted-foreground opacity-30" />
+                  <p className="text-xs text-muted-foreground mb-3">{chatsError}</p>
+                  {chatsError.includes("Подключите") && (
+                    <button
+                      onClick={() => setTab("settings")}
+                      className="text-xs text-foreground underline"
+                    >
+                      Перейти в Настройки
+                    </button>
+                  )}
+                </div>
+              ) : filteredChats.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-32 text-muted-foreground text-sm">
                   <Icon name="Inbox" size={28} className="mb-2 opacity-30" />
-                  Ничего не найдено
+                  {chats.length === 0 ? "Чатов не найдено" : "Ничего не найдено"}
                 </div>
               ) : (
                 filteredChats.map((chat) => (
                   <button
                     key={chat.id}
-                    onClick={() => setSelectedChat(chat.id)}
+                    onClick={() => setSelectedChatId(chat.id)}
                     className={`w-full text-left px-4 py-3 chat-item-hover border-b border-border/50 last:border-0 ${
-                      selectedChat === chat.id ? "bg-secondary" : ""
+                      selectedChatId === chat.id ? "bg-secondary" : ""
                     }`}
                   >
                     <div className="flex items-start gap-3">
-                      <div className="w-9 h-9 rounded-full bg-foreground/10 flex items-center justify-center text-sm font-semibold text-foreground shrink-0">
-                        {chat.avatar}
+                      <div className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-semibold shrink-0 ${
+                        chat.is_new ? "bg-orange-100 text-orange-700" : "bg-foreground/10 text-foreground"
+                      }`}>
+                        {avatarLetter(chat.author_name)}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between mb-0.5">
-                          <span className="text-sm font-medium text-foreground truncate">{chat.name}</span>
-                          <span className="text-xs text-muted-foreground shrink-0 ml-2">{chat.time}</span>
+                          <span className="text-sm font-medium text-foreground truncate">{chat.author_name}</span>
+                          <span className="text-xs text-muted-foreground shrink-0 ml-2">
+                            {formatTime(chat.last_message_time)}
+                          </span>
                         </div>
-                        <div className="text-xs text-muted-foreground truncate mb-1">{chat.item}</div>
+                        <div className="text-xs text-muted-foreground truncate mb-1">{chat.item_title}</div>
                         <div className="flex items-center justify-between">
-                          <span className="text-xs text-muted-foreground truncate flex-1">{chat.lastMsg}</span>
-                          {chat.unread > 0 && (
-                            <span className="ml-2 w-4 h-4 rounded-full bg-foreground text-background text-[10px] flex items-center justify-center shrink-0">
-                              {chat.unread}
+                          <span className="text-xs text-muted-foreground truncate flex-1">{chat.last_message_text}</span>
+                          {chat.unread_count > 0 && (
+                            <span className="ml-2 min-w-4 h-4 px-1 rounded-full bg-orange-500 text-white text-[10px] flex items-center justify-center shrink-0">
+                              {chat.unread_count}
                             </span>
                           )}
                         </div>
@@ -328,44 +392,71 @@ export default function Index() {
                 <div className="px-6 py-4 border-b border-border bg-card flex items-center justify-between shrink-0">
                   <div className="flex items-center gap-3">
                     <div className="w-9 h-9 rounded-full bg-foreground/10 flex items-center justify-center text-sm font-semibold">
-                      {activeChat.avatar}
+                      {avatarLetter(activeChat.author_name)}
                     </div>
                     <div>
-                      <div className="text-sm font-semibold text-foreground">{activeChat.name}</div>
-                      <div className="text-xs text-muted-foreground">{activeChat.item}</div>
+                      <div className="text-sm font-semibold text-foreground">{activeChat.author_name}</div>
+                      <div className="text-xs text-muted-foreground flex items-center gap-1.5">
+                        {activeChat.item_url ? (
+                          <a
+                            href={activeChat.item_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="hover:text-foreground transition-colors underline"
+                          >
+                            {activeChat.item_title}
+                          </a>
+                        ) : (
+                          <span>{activeChat.item_title}</span>
+                        )}
+                      </div>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className={`text-xs px-2.5 py-1 rounded-lg ${STATUS_COLORS[activeChat.status]}`}>
-                      {STATUS_LABELS[activeChat.status]}
-                    </span>
-                    <span className="text-xs text-muted-foreground bg-secondary px-2.5 py-1 rounded-lg flex items-center gap-1">
-                      <Icon name="Clock" size={11} />
-                      {activeChat.avgResponseTime}
-                    </span>
-                    <button className="w-8 h-8 rounded-lg hover:bg-secondary flex items-center justify-center text-muted-foreground transition-colors">
-                      <Icon name="MoreHorizontal" size={16} />
+                    {activeChat.is_new && (
+                      <span className="text-xs px-2.5 py-1 rounded-lg bg-orange-100 text-orange-700">
+                        Непрочитано
+                      </span>
+                    )}
+                    <button
+                      onClick={() => selectedChatId && fetchMessages(selectedChatId)}
+                      className="w-8 h-8 rounded-lg hover:bg-secondary flex items-center justify-center text-muted-foreground transition-colors"
+                      title="Обновить"
+                    >
+                      <Icon name="RefreshCw" size={14} className={messagesLoading ? "animate-spin" : ""} />
                     </button>
                   </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto scrollbar-thin px-6 py-6 space-y-4 animate-fade-in">
-                  {messages.map((msg, i) => (
-                    <div key={i} className={`flex ${msg.from === "me" ? "justify-end" : "justify-start"}`}>
-                      <div
-                        className={`max-w-sm px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${
-                          msg.from === "me"
-                            ? "bg-foreground text-background rounded-br-sm"
-                            : "bg-card border border-border text-foreground rounded-bl-sm"
-                        }`}
-                      >
-                        {msg.text}
-                        <div className={`text-[10px] mt-1 ${msg.from === "me" ? "text-background/50" : "text-muted-foreground"}`}>
-                          {msg.time}
+                <div className="flex-1 overflow-y-auto scrollbar-thin px-6 py-6 space-y-4">
+                  {messagesLoading ? (
+                    <div className="flex justify-center pt-10">
+                      <Icon name="Loader" size={24} className="animate-spin text-muted-foreground opacity-40" />
+                    </div>
+                  ) : messages.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center h-32 text-muted-foreground text-sm">
+                      <Icon name="MessageCircle" size={28} className="mb-2 opacity-20" />
+                      Сообщений пока нет
+                    </div>
+                  ) : (
+                    messages.map((msg) => (
+                      <div key={msg.id} className={`flex ${msg.from === "me" ? "justify-end" : "justify-start"} animate-fade-in`}>
+                        <div
+                          className={`max-w-sm px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${
+                            msg.from === "me"
+                              ? "bg-foreground text-background rounded-br-sm"
+                              : "bg-card border border-border text-foreground rounded-bl-sm"
+                          }`}
+                        >
+                          {msg.text || <span className="opacity-40 italic">Медиафайл</span>}
+                          <div className={`text-[10px] mt-1 ${msg.from === "me" ? "text-background/50" : "text-muted-foreground"}`}>
+                            {msg.time_display || formatTime(msg.time)}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    ))
+                  )}
+                  <div ref={messagesEndRef} />
                 </div>
 
                 <div className="px-6 py-4 border-t border-border bg-card shrink-0">
@@ -375,13 +466,14 @@ export default function Index() {
                       value={newMessage}
                       onChange={(e) => setNewMessage(e.target.value)}
                       className="flex-1 bg-secondary border-0 focus-visible:ring-1 text-sm"
-                      onKeyDown={(e) => { if (e.key === "Enter") setNewMessage(""); }}
+                      onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }}
                     />
                     <button
-                      className="w-9 h-9 rounded-xl bg-foreground text-background flex items-center justify-center hover:opacity-80 transition-opacity shrink-0"
-                      onClick={() => setNewMessage("")}
+                      disabled={sendingMessage || !newMessage.trim()}
+                      className="w-9 h-9 rounded-xl bg-foreground text-background flex items-center justify-center hover:opacity-80 transition-opacity shrink-0 disabled:opacity-30"
+                      onClick={handleSendMessage}
                     >
-                      <Icon name="Send" size={15} />
+                      <Icon name={sendingMessage ? "Loader" : "Send"} size={15} className={sendingMessage ? "animate-spin" : ""} />
                     </button>
                   </div>
                 </div>
@@ -401,14 +493,14 @@ export default function Index() {
         <div className="flex-1 overflow-y-auto scrollbar-thin p-8 animate-fade-in">
           <div className="max-w-4xl mx-auto">
             <h2 className="text-xl font-semibold text-foreground mb-1">Статистика</h2>
-            <p className="text-sm text-muted-foreground mb-8">Аналитика по чатам и активности</p>
+            <p className="text-sm text-muted-foreground mb-8">Аналитика по чатам</p>
 
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-10">
               {[
-                { label: "Всего чатов", value: "6", icon: "MessageSquare", sub: "+2 за неделю" },
-                { label: "Новых сообщений", value: "47", icon: "Bell", sub: "за последние 7 дней" },
-                { label: "Среднее время ответа", value: "18 мин", icon: "Clock", sub: "улучшилось на 12%" },
-                { label: "Активных чатов", value: "3", icon: "Activity", sub: "из 6 всего" },
+                { label: "Всего чатов", value: String(chats.length), icon: "MessageSquare", sub: "загружено из Avito" },
+                { label: "Непрочитанных", value: String(totalUnread), icon: "Bell", sub: "требуют ответа" },
+                { label: "Прочитанных", value: String(chats.filter((c) => !c.is_new).length), icon: "CheckCircle", sub: "обработано" },
+                { label: "Объявлений", value: String(new Set(chats.map((c) => c.item_id)).size), icon: "Tag", sub: "уникальных" },
               ].map((s, i) => (
                 <div key={i} className="bg-card border border-border rounded-2xl p-5 stat-card">
                   <div className="flex items-start justify-between mb-4">
@@ -423,52 +515,45 @@ export default function Index() {
               ))}
             </div>
 
-            <div className="bg-card border border-border rounded-2xl p-6 mb-6">
-              <h3 className="text-sm font-semibold text-foreground mb-5">Активность по чатам</h3>
-              <div className="space-y-3">
-                {MOCK_CHATS.map((chat) => {
-                  const msgs = MOCK_MESSAGES[chat.id]?.length || 0;
-                  const pct = Math.round((msgs / 3) * 100);
-                  return (
+            {chats.length > 0 && (
+              <div className="bg-card border border-border rounded-2xl p-6 mb-6">
+                <h3 className="text-sm font-semibold text-foreground mb-5">Активные чаты</h3>
+                <div className="space-y-3">
+                  {chats.slice(0, 8).map((chat) => (
                     <div key={chat.id} className="flex items-center gap-4">
-                      <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center text-xs font-semibold shrink-0">
-                        {chat.avatar}
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold shrink-0 ${
+                        chat.is_new ? "bg-orange-100 text-orange-700" : "bg-secondary text-foreground"
+                      }`}>
+                        {avatarLetter(chat.author_name)}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between mb-1">
-                          <span className="text-sm text-foreground truncate">{chat.name}</span>
-                          <span className="text-xs text-muted-foreground ml-2">{msgs} сообщ.</span>
+                          <span className="text-sm text-foreground truncate">{chat.author_name}</span>
+                          <span className="text-xs text-muted-foreground ml-2 truncate max-w-32">{chat.item_title}</span>
                         </div>
                         <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
                           <div
-                            className="h-full bg-foreground rounded-full transition-all duration-500"
-                            style={{ width: `${pct}%` }}
+                            className={`h-full rounded-full ${chat.is_new ? "bg-orange-400" : "bg-foreground/40"}`}
+                            style={{ width: chat.is_new ? "100%" : "30%" }}
                           />
                         </div>
                       </div>
-                      <div className="text-xs text-muted-foreground w-14 text-right shrink-0">{chat.avgResponseTime}</div>
+                      <span className="text-xs text-muted-foreground shrink-0">{formatTime(chat.last_message_time)}</span>
                     </div>
-                  );
-                })}
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
 
-            <div className="bg-card border border-border rounded-2xl p-6">
-              <h3 className="text-sm font-semibold text-foreground mb-5">Статусы чатов</h3>
-              <div className="flex gap-6">
-                {[
-                  { label: "Активные", count: MOCK_CHATS.filter((c) => c.status === "active").length, color: "bg-emerald-500" },
-                  { label: "Новые", count: MOCK_CHATS.filter((c) => c.status === "new").length, color: "bg-orange-500" },
-                  { label: "Архив", count: MOCK_CHATS.filter((c) => c.status === "archived").length, color: "bg-gray-300" },
-                ].map((s, i) => (
-                  <div key={i} className="flex items-center gap-2.5">
-                    <div className={`w-2.5 h-2.5 rounded-full ${s.color}`} />
-                    <span className="text-sm text-foreground">{s.label}</span>
-                    <span className="text-sm font-semibold text-foreground">{s.count}</span>
-                  </div>
-                ))}
+            {chats.length === 0 && !chatsLoading && (
+              <div className="bg-card border border-border rounded-2xl p-8 text-center">
+                <Icon name="BarChart3" size={32} className="mx-auto mb-3 opacity-20 text-foreground" />
+                <p className="text-sm text-muted-foreground">Нет данных. Сначала подключите Avito в Настройках.</p>
+                <button onClick={() => setTab("settings")} className="mt-3 text-sm text-foreground underline">
+                  Перейти в Настройки
+                </button>
               </div>
-            </div>
+            )}
           </div>
         </div>
       )}
@@ -479,12 +564,18 @@ export default function Index() {
           <div className="max-w-2xl mx-auto">
             <div className="flex items-center justify-between mb-1">
               <h2 className="text-xl font-semibold text-foreground">История синхронизации</h2>
-              <button className="flex items-center gap-2 text-sm text-muted-foreground bg-secondary hover:bg-border px-3 py-1.5 rounded-lg transition-colors">
-                <Icon name="RefreshCw" size={13} />
+              <button
+                onClick={fetchChats}
+                disabled={chatsLoading}
+                className="flex items-center gap-2 text-sm text-muted-foreground bg-secondary hover:bg-border px-3 py-1.5 rounded-lg transition-colors"
+              >
+                <Icon name="RefreshCw" size={13} className={chatsLoading ? "animate-spin" : ""} />
                 Синхронизировать
               </button>
             </div>
-            <p className="text-sm text-muted-foreground mb-8">Последнее обновление: сегодня в 14:35</p>
+            <p className="text-sm text-muted-foreground mb-8">
+              Чатов загружено: {chats.length}
+            </p>
 
             <div className="bg-card border border-border rounded-2xl overflow-hidden">
               {SYNC_LOGS.map((log, i) => (
@@ -492,26 +583,27 @@ export default function Index() {
                   key={log.id}
                   className={`flex items-center gap-4 px-5 py-4 ${i < SYNC_LOGS.length - 1 ? "border-b border-border" : ""}`}
                 >
-                  <div
-                    className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
-                      log.status === "ok" ? "bg-emerald-50" : "bg-red-50"
-                    }`}
-                  >
-                    <Icon
-                      name={log.status === "ok" ? "CheckCircle" : "XCircle"}
-                      size={15}
-                      className={log.status === "ok" ? "text-emerald-600" : "text-red-500"}
-                    />
+                  <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 bg-emerald-50">
+                    <Icon name="CheckCircle" size={15} className="text-emerald-600" />
                   </div>
                   <div className="flex-1">
                     <div className="text-sm text-foreground">{log.event}</div>
-                    {log.count > 0 && (
-                      <div className="text-xs text-muted-foreground mt-0.5">{log.count} сообщений</div>
-                    )}
+                    <div className="text-xs text-muted-foreground mt-0.5">{chats.length} чатов</div>
                   </div>
                   <div className="text-xs text-muted-foreground">{log.time}</div>
                 </div>
               ))}
+              {chatsError && (
+                <div className="flex items-center gap-4 px-5 py-4 border-t border-border">
+                  <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 bg-red-50">
+                    <Icon name="XCircle" size={15} className="text-red-500" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-sm text-foreground">Ошибка синхронизации</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">{chatsError}</div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -525,8 +617,6 @@ export default function Index() {
             <p className="text-sm text-muted-foreground mb-8">Управление аккаунтом и подключением</p>
 
             <div className="space-y-4">
-
-              {/* Connection status */}
               <div className="bg-card border border-border rounded-2xl p-6">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-sm font-semibold text-foreground">Подключение к Avito API</h3>
@@ -627,12 +717,11 @@ export default function Index() {
                 </p>
               </div>
 
-              {/* Sync settings */}
               <div className="bg-card border border-border rounded-2xl p-6">
                 <h3 className="text-sm font-semibold text-foreground mb-4">Синхронизация</h3>
                 <div className="space-y-3">
                   {[
-                    { label: "Автосинхронизация", sub: "Каждые 5 минут", active: true },
+                    { label: "Автосинхронизация", sub: "При открытии раздела Чаты", active: true },
                     { label: "Уведомления о новых чатах", sub: "Push и email", active: true },
                     { label: "Архивировать старые чаты", sub: "Через 30 дней неактивности", active: false },
                   ].map((s, i) => (
@@ -654,7 +743,6 @@ export default function Index() {
                   ))}
                 </div>
               </div>
-
             </div>
           </div>
         </div>

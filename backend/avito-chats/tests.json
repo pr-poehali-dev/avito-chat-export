@@ -1,0 +1,12 @@
+{
+  "tests": [
+    {
+      "name": "GET chats - без токена возвращает 401",
+      "method": "GET",
+      "path": "/",
+      "expectedStatus": 401,
+      "expectedBody": { "error": "Токен не найден. Подключите Avito в Настройках." },
+      "bodyMatcher": "partial"
+    }
+  ]
+}
