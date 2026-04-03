@@ -91,6 +91,16 @@ def handler(event: dict, context) -> dict:
         except urllib.error.HTTPError as e:
             body = e.read().decode("utf-8")
             print(f"[avito-messages] GET error {e.code}: {body}")
+            if e.code == 402:
+                return {
+                    "statusCode": 200,
+                    "headers": {**cors_headers(), "Content-Type": "application/json"},
+                    "body": json.dumps({
+                        "error": "subscription_required",
+                        "message": "Для чтения сообщений нужна подписка на API мессенджера Avito",
+                        "messages": [],
+                    }),
+                }
             return {
                 "statusCode": 200,
                 "headers": {**cors_headers(), "Content-Type": "application/json"},

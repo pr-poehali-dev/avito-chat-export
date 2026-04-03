@@ -75,6 +75,7 @@ export default function Index() {
 
   const [messages, setMessages] = useState<AvitoMessage[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
+  const [messagesError, setMessagesError] = useState<"subscription" | "error" | null>(null);
   const [sendingMessage, setSendingMessage] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -121,15 +122,21 @@ export default function Index() {
 
   const fetchMessages = useCallback(async (chatId: string) => {
     setMessagesLoading(true);
+    setMessagesError(null);
     try {
       const res = await fetch(`${AVITO_MESSAGES_URL}?chat_id=${chatId}`);
       const data = await res.json();
-      if (res.ok) {
-        setMessages(data.messages || []);
-      } else {
+      if (data.error === "subscription_required") {
+        setMessagesError("subscription");
         setMessages([]);
+      } else if (data.error) {
+        setMessagesError("error");
+        setMessages([]);
+      } else {
+        setMessages(data.messages || []);
       }
     } catch {
+      setMessagesError("error");
       setMessages([]);
     } finally {
       setMessagesLoading(false);
@@ -440,6 +447,30 @@ export default function Index() {
                     <div className="flex justify-center pt-10">
                       <Icon name="Loader" size={24} className="animate-spin text-muted-foreground opacity-40" />
                     </div>
+                  ) : messagesError === "subscription" ? (
+                    <div className="flex flex-col items-center justify-center flex-1 px-8 text-center animate-fade-in">
+                      <div className="w-14 h-14 rounded-2xl bg-orange-50 flex items-center justify-center mb-4">
+                        <Icon name="Lock" size={24} className="text-orange-500" />
+                      </div>
+                      <p className="text-sm font-medium text-foreground mb-1">Нужна подписка Avito</p>
+                      <p className="text-xs text-muted-foreground mb-5 leading-relaxed max-w-xs">
+                        Для чтения и отправки сообщений через API требуется тариф с доступом к API мессенджера
+                      </p>
+                      <a
+                        href="https://www.avito.ru/professionals/api"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-foreground text-background text-xs font-medium hover:opacity-80 transition-opacity"
+                      >
+                        <Icon name="ExternalLink" size={12} />
+                        Подключить в личном кабинете
+                      </a>
+                    </div>
+                  ) : messagesError === "error" ? (
+                    <div className="flex flex-col items-center justify-center h-32 text-muted-foreground text-sm">
+                      <Icon name="AlertCircle" size={28} className="mb-2 opacity-30" />
+                      Не удалось загрузить сообщения
+                    </div>
                   ) : messages.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-32 text-muted-foreground text-sm">
                       <Icon name="MessageCircle" size={28} className="mb-2 opacity-20" />
@@ -467,6 +498,12 @@ export default function Index() {
                 </div>
 
                 <div className="px-6 py-4 border-t border-border bg-card shrink-0">
+                  {messagesError === "subscription" ? (
+                    <div className="flex items-center gap-2 text-xs text-orange-600 bg-orange-50 px-3 py-2.5 rounded-xl">
+                      <Icon name="Lock" size={12} />
+                      Отправка недоступна — нужна подписка на API мессенджера
+                    </div>
+                  ) : (
                   <div className="flex gap-2 items-end">
                     <Input
                       placeholder="Написать сообщение..."
@@ -483,6 +520,7 @@ export default function Index() {
                       <Icon name={sendingMessage ? "Loader" : "Send"} size={15} className={sendingMessage ? "animate-spin" : ""} />
                     </button>
                   </div>
+                  )}
                 </div>
               </>
             ) : (
