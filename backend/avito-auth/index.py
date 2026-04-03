@@ -1,6 +1,6 @@
 """
 Авторизация через Avito API: получение access_token по client_credentials.
-Сохраняет токен в БД. Поддерживает GET (статус) и POST (получить/обновить токен).
+Сохраняет токен и credentials в БД. GET — статус, POST — подключить/обновить.
 """
 import json
 import os
@@ -26,6 +26,22 @@ def cors_headers():
     }
 
 
+def fetch_token_from_avito(client_id: str, client_secret: str):
+    data = urllib.parse.urlencode({
+        "grant_type": "client_credentials",
+        "client_id": client_id,
+        "client_secret": client_secret,
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        AVITO_TOKEN_URL,
+        data=data,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
 def handler(event: dict, context) -> dict:
     if event.get("httpMethod") == "OPTIONS":
         return {"statusCode": 200, "headers": cors_headers(), "body": ""}
@@ -42,16 +58,30 @@ def handler(event: dict, context) -> dict:
                 body = json.loads(event["body"])
             except Exception:
                 pass
-        client_id = body.get("client_id") or os.environ.get("AVITO_CLIENT_ID", "")
-        client_secret = body.get("client_secret") or os.environ.get("AVITO_CLIENT_SECRET", "")
+
+        client_id = body.get("client_id", "").strip()
+        client_secret = body.get("client_secret", "").strip()
         user_id = body.get("user_id")
 
+        # Если credentials не переданы — пробуем взять из БД и просто обновить токен
         if not client_id or not client_secret:
-            return {
-                "statusCode": 400,
-                "headers": {**cors_headers(), "Content-Type": "application/json"},
-                "body": json.dumps({"success": False, "error": "client_id и client_secret обязательны"}),
-            }
+            conn = get_db()
+            cur = conn.cursor()
+            cur.execute(f"SELECT client_id, client_secret, user_id FROM {DB_SCHEMA}.avito_tokens ORDER BY id DESC LIMIT 1")
+            row = cur.fetchone()
+            cur.close()
+            conn.close()
+            if row and row[0] and row[1]:
+                client_id, client_secret = row[0], row[1]
+                if not user_id:
+                    user_id = row[2]
+            else:
+                return {
+                    "statusCode": 400,
+                    "headers": {**cors_headers(), "Content-Type": "application/json"},
+                    "body": json.dumps({"success": False, "error": "client_id и client_secret обязательны"}),
+                }
+
         return handle_auth(client_id, client_secret, user_id)
 
     return {
@@ -65,7 +95,7 @@ def handle_status():
     conn = get_db()
     cur = conn.cursor()
     cur.execute(
-        f"SELECT access_token, expires_at, updated_at, user_id FROM {DB_SCHEMA}.avito_tokens ORDER BY id DESC LIMIT 1"
+        f"SELECT access_token, expires_at, updated_at, user_id, client_id FROM {DB_SCHEMA}.avito_tokens ORDER BY id DESC LIMIT 1"
     )
     row = cur.fetchone()
     cur.close()
@@ -75,10 +105,10 @@ def handle_status():
         return {
             "statusCode": 200,
             "headers": {**cors_headers(), "Content-Type": "application/json"},
-            "body": json.dumps({"connected": False, "message": "Токен не найден. Введите Client ID и Client Secret."}),
+            "body": json.dumps({"connected": False, "message": "Токен не найден. Введите данные ниже."}),
         }
 
-    access_token, expires_at, updated_at, saved_user_id = row
+    access_token, expires_at, updated_at, saved_user_id, saved_client_id = row
     now = datetime.now(timezone.utc)
     is_valid = expires_at > now
     expires_in_minutes = int((expires_at - now).total_seconds() / 60) if is_valid else 0
@@ -93,29 +123,18 @@ def handle_status():
             "expires_in_minutes": expires_in_minutes,
             "updated_at": updated_at.isoformat(),
             "user_id": saved_user_id,
+            "has_credentials": bool(saved_client_id),
         }),
     }
 
 
 def handle_auth(client_id: str, client_secret: str, user_id=None):
-    data = urllib.parse.urlencode({
-        "grant_type": "client_credentials",
-        "client_id": client_id,
-        "client_secret": client_secret,
-    }).encode("utf-8")
-
-    req = urllib.request.Request(
-        AVITO_TOKEN_URL,
-        data=data,
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-        method="POST",
-    )
-
+    print(f"[avito-auth] fetching token for client_id={client_id[:8]}... user_id={user_id}")
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
+        result = fetch_token_from_avito(client_id, client_secret)
     except urllib.error.HTTPError as e:
         error_body = e.read().decode("utf-8")
+        print(f"[avito-auth] token error {e.code}: {error_body}")
         try:
             error_data = json.loads(error_body)
         except Exception:
@@ -133,13 +152,16 @@ def handle_auth(client_id: str, client_secret: str, user_id=None):
     expires_in = result.get("expires_in", 86400)
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
 
+    print(f"[avito-auth] token received, expires_in={expires_in}s, saving to DB")
+
     conn = get_db()
     cur = conn.cursor()
     cur.execute(f"DELETE FROM {DB_SCHEMA}.avito_tokens")
     cur.execute(
-        f"""INSERT INTO {DB_SCHEMA}.avito_tokens (access_token, expires_at, updated_at, user_id)
-            VALUES (%s, %s, %s, %s)""",
-        (access_token, expires_at, datetime.now(timezone.utc), user_id),
+        f"""INSERT INTO {DB_SCHEMA}.avito_tokens
+            (access_token, expires_at, updated_at, user_id, client_id, client_secret)
+            VALUES (%s, %s, %s, %s, %s, %s)""",
+        (access_token, expires_at, datetime.now(timezone.utc), user_id, client_id, client_secret),
     )
     conn.commit()
     cur.close()
@@ -153,5 +175,6 @@ def handle_auth(client_id: str, client_secret: str, user_id=None):
             "token_preview": access_token[:12] + "...",
             "expires_in_minutes": int(expires_in / 60),
             "expires_at": expires_at.isoformat(),
+            "user_id": user_id,
         }),
     }
