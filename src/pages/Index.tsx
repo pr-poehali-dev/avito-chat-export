@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 const AVITO_AUTH_URL = "https://functions.poehali.dev/9f643d6b-b87f-4d31-9588-03067993ba01";
 const AVITO_CHATS_URL = "https://functions.poehali.dev/b11d7cfc-045e-47b0-b0cd-89dec73bde14";
 const AVITO_MESSAGES_URL = "https://functions.poehali.dev/c3bc0f84-fbae-48a0-bcc6-5e791b369ea6";
+const AVITO_STATS_URL = "https://functions.poehali.dev/bdb9ebb9-4e07-44cf-a85f-961d88a2b6e7";
 
 interface AuthStatus {
   connected: boolean;
@@ -37,6 +38,37 @@ interface AvitoMessage {
   time: string | null;
   time_display: string;
   type: string;
+}
+
+interface AvitoItem {
+  id: number;
+  title: string;
+  price: string;
+  status: string;
+  url: string;
+  views: number;
+  contacts: number;
+  category: string;
+}
+
+interface AvitoProfile {
+  id: number;
+  name: string;
+  email?: string;
+  phone?: string;
+  profile_url?: string;
+  avatar_url?: string;
+}
+
+interface AvitoStats {
+  profile?: AvitoProfile;
+  profile_error?: string;
+  items_count: number;
+  items: AvitoItem[];
+  items_error?: string;
+  chats_count: number;
+  chats_unread: number;
+  error?: string;
 }
 
 type Tab = "chats" | "stats" | "sync" | "settings";
@@ -79,6 +111,10 @@ export default function Index() {
   const [sendingMessage, setSendingMessage] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const [avitoStats, setAvitoStats] = useState<AvitoStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [statsError, setStatsError] = useState("");
 
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
@@ -143,13 +179,33 @@ export default function Index() {
     }
   }, []);
 
+  const fetchStats = useCallback(async () => {
+    setStatsLoading(true);
+    setStatsError("");
+    try {
+      const res = await fetch(AVITO_STATS_URL);
+      const data = await res.json();
+      if (data.error) {
+        setStatsError(data.error);
+        setAvitoStats(null);
+      } else {
+        setAvitoStats(data);
+      }
+    } catch {
+      setStatsError("Не удалось загрузить статистику");
+    } finally {
+      setStatsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (tab === "chats") fetchChats();
   }, [tab]);
 
   useEffect(() => {
     if (tab === "settings") fetchAuthStatus();
-  }, [tab, fetchAuthStatus]);
+    if (tab === "stats") fetchStats();
+  }, [tab, fetchAuthStatus, fetchStats]);
 
   useEffect(() => {
     if (selectedChatId) fetchMessages(selectedChatId);
@@ -537,67 +593,139 @@ export default function Index() {
       {tab === "stats" && (
         <div className="flex-1 overflow-y-auto scrollbar-thin p-8 animate-fade-in">
           <div className="max-w-4xl mx-auto">
-            <h2 className="text-xl font-semibold text-foreground mb-1">Статистика</h2>
-            <p className="text-sm text-muted-foreground mb-8">Аналитика по чатам</p>
-
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-10">
-              {[
-                { label: "Всего чатов", value: String(chats.length), icon: "MessageSquare", sub: "загружено из Avito" },
-                { label: "Непрочитанных", value: String(totalUnread), icon: "Bell", sub: "требуют ответа" },
-                { label: "Прочитанных", value: String(chats.filter((c) => !c.is_new).length), icon: "CheckCircle", sub: "обработано" },
-                { label: "Объявлений", value: String(new Set(chats.map((c) => c.item_id)).size), icon: "Tag", sub: "уникальных" },
-              ].map((s, i) => (
-                <div key={i} className="bg-card border border-border rounded-2xl p-5 stat-card">
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="w-9 h-9 rounded-xl bg-secondary flex items-center justify-center">
-                      <Icon name={s.icon} fallback="Circle" size={16} className="text-foreground" />
-                    </div>
-                  </div>
-                  <div className="text-2xl font-semibold text-foreground mb-1">{s.value}</div>
-                  <div className="text-sm font-medium text-foreground mb-1">{s.label}</div>
-                  <div className="text-xs text-muted-foreground">{s.sub}</div>
-                </div>
-              ))}
+            <div className="flex items-center justify-between mb-1">
+              <h2 className="text-xl font-semibold text-foreground">Статистика</h2>
+              <button
+                onClick={fetchStats}
+                disabled={statsLoading}
+                className="flex items-center gap-2 text-sm text-muted-foreground bg-secondary hover:bg-border px-3 py-1.5 rounded-lg transition-colors"
+              >
+                <Icon name="RefreshCw" size={13} className={statsLoading ? "animate-spin" : ""} />
+                Обновить
+              </button>
             </div>
+            <p className="text-sm text-muted-foreground mb-8">Данные из вашего аккаунта Avito</p>
 
-            {chats.length > 0 && (
-              <div className="bg-card border border-border rounded-2xl p-6 mb-6">
-                <h3 className="text-sm font-semibold text-foreground mb-5">Активные чаты</h3>
-                <div className="space-y-3">
-                  {chats.slice(0, 8).map((chat) => (
-                    <div key={chat.id} className="flex items-center gap-4">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold shrink-0 ${
-                        chat.is_new ? "bg-orange-100 text-orange-700" : "bg-secondary text-foreground"
-                      }`}>
-                        {avatarLetter(chat.author_name)}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-sm text-foreground truncate">{chat.author_name}</span>
-                          <span className="text-xs text-muted-foreground ml-2 truncate max-w-32">{chat.item_title}</span>
-                        </div>
-                        <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
-                          <div
-                            className={`h-full rounded-full ${chat.is_new ? "bg-orange-400" : "bg-foreground/40"}`}
-                            style={{ width: chat.is_new ? "100%" : "30%" }}
-                          />
-                        </div>
-                      </div>
-                      <span className="text-xs text-muted-foreground shrink-0">{formatTime(chat.last_message_time)}</span>
-                    </div>
-                  ))}
-                </div>
+            {statsLoading && (
+              <div className="flex flex-col items-center justify-center h-48 text-muted-foreground text-sm">
+                <Icon name="Loader" size={28} className="mb-2 animate-spin opacity-40" />
+                Загружаю статистику...
               </div>
             )}
 
-            {chats.length === 0 && !chatsLoading && (
+            {!statsLoading && statsError && (
               <div className="bg-card border border-border rounded-2xl p-8 text-center">
-                <Icon name="BarChart3" size={32} className="mx-auto mb-3 opacity-20 text-foreground" />
-                <p className="text-sm text-muted-foreground">Нет данных. Сначала подключите Avito в Настройках.</p>
-                <button onClick={() => setTab("settings")} className="mt-3 text-sm text-foreground underline">
-                  Перейти в Настройки
+                <Icon name="WifiOff" size={32} className="mx-auto mb-3 opacity-20 text-foreground" />
+                <p className="text-sm text-muted-foreground mb-3">{statsError}</p>
+                <button onClick={() => setTab("settings")} className="text-sm text-foreground underline">
+                  Подключить Avito в Настройках
                 </button>
               </div>
+            )}
+
+            {!statsLoading && avitoStats && (
+              <>
+                {/* Профиль */}
+                {avitoStats.profile && (
+                  <div className="bg-card border border-border rounded-2xl p-5 mb-6 flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-full bg-foreground/10 flex items-center justify-center text-lg font-semibold shrink-0">
+                      {avitoStats.profile.avatar_url
+                        ? <img src={avitoStats.profile.avatar_url} className="w-12 h-12 rounded-full object-cover" alt="" />
+                        : avatarLetter(avitoStats.profile.name || "A")}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-semibold text-foreground">{avitoStats.profile.name}</div>
+                      {avitoStats.profile.email && (
+                        <div className="text-xs text-muted-foreground">{avitoStats.profile.email}</div>
+                      )}
+                    </div>
+                    {avitoStats.profile.profile_url && (
+                      <a
+                        href={avitoStats.profile.profile_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        <Icon name="ExternalLink" size={13} />
+                        Профиль
+                      </a>
+                    )}
+                  </div>
+                )}
+
+                {/* Ключевые метрики */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                  {[
+                    { label: "Объявлений", value: String(avitoStats.items_count), icon: "Tag", sub: "активных" },
+                    { label: "Чатов", value: String(avitoStats.chats_count), icon: "MessageSquare", sub: "всего" },
+                    { label: "Непрочитанных", value: String(avitoStats.chats_unread), icon: "Bell", sub: "требуют ответа" },
+                    {
+                      label: "Просмотров",
+                      value: String(avitoStats.items.reduce((a, i) => a + (i.views || 0), 0)),
+                      icon: "Eye",
+                      sub: "по объявлениям",
+                    },
+                  ].map((s, i) => (
+                    <div key={i} className="bg-card border border-border rounded-2xl p-5 stat-card">
+                      <div className="w-9 h-9 rounded-xl bg-secondary flex items-center justify-center mb-4">
+                        <Icon name={s.icon} fallback="Circle" size={16} className="text-foreground" />
+                      </div>
+                      <div className="text-2xl font-semibold text-foreground mb-1">{s.value}</div>
+                      <div className="text-sm font-medium text-foreground mb-0.5">{s.label}</div>
+                      <div className="text-xs text-muted-foreground">{s.sub}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Объявления */}
+                {avitoStats.items.length > 0 && (
+                  <div className="bg-card border border-border rounded-2xl overflow-hidden mb-6">
+                    <div className="px-5 py-4 border-b border-border flex items-center justify-between">
+                      <h3 className="text-sm font-semibold text-foreground">Активные объявления</h3>
+                      <span className="text-xs text-muted-foreground">{avitoStats.items_count} всего</span>
+                    </div>
+                    <div className="divide-y divide-border">
+                      {avitoStats.items.map((item) => (
+                        <div key={item.id} className="flex items-center gap-4 px-5 py-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-0.5">
+                              <a
+                                href={item.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-sm text-foreground hover:underline truncate"
+                              >
+                                {item.title}
+                              </a>
+                            </div>
+                            <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                              {item.category && <span>{item.category}</span>}
+                              {item.price && <span className="font-medium text-foreground">{item.price}</span>}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-4 shrink-0">
+                            <div className="text-center">
+                              <div className="text-sm font-semibold text-foreground">{item.views}</div>
+                              <div className="text-[10px] text-muted-foreground">просм.</div>
+                            </div>
+                            <div className="text-center">
+                              <div className="text-sm font-semibold text-foreground">{item.contacts}</div>
+                              <div className="text-[10px] text-muted-foreground">контакт.</div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {avitoStats.items_error && (
+                  <div className="bg-card border border-border rounded-2xl p-5 mb-6 flex items-center gap-3 text-sm text-muted-foreground">
+                    <Icon name="AlertCircle" size={16} className="opacity-40" />
+                    Объявления недоступны (код {avitoStats.items_error}) — возможно нет доступа в вашем тарифе
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
