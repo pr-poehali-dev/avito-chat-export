@@ -44,6 +44,7 @@ def handler(event: dict, context) -> dict:
                 pass
         client_id = body.get("client_id") or os.environ.get("AVITO_CLIENT_ID", "")
         client_secret = body.get("client_secret") or os.environ.get("AVITO_CLIENT_SECRET", "")
+        user_id = body.get("user_id")
 
         if not client_id or not client_secret:
             return {
@@ -51,7 +52,7 @@ def handler(event: dict, context) -> dict:
                 "headers": {**cors_headers(), "Content-Type": "application/json"},
                 "body": json.dumps({"success": False, "error": "client_id и client_secret обязательны"}),
             }
-        return handle_auth(client_id, client_secret)
+        return handle_auth(client_id, client_secret, user_id)
 
     return {
         "statusCode": 405,
@@ -64,7 +65,7 @@ def handle_status():
     conn = get_db()
     cur = conn.cursor()
     cur.execute(
-        f"SELECT access_token, expires_at, updated_at FROM {DB_SCHEMA}.avito_tokens ORDER BY id DESC LIMIT 1"
+        f"SELECT access_token, expires_at, updated_at, user_id FROM {DB_SCHEMA}.avito_tokens ORDER BY id DESC LIMIT 1"
     )
     row = cur.fetchone()
     cur.close()
@@ -77,7 +78,7 @@ def handle_status():
             "body": json.dumps({"connected": False, "message": "Токен не найден. Введите Client ID и Client Secret."}),
         }
 
-    access_token, expires_at, updated_at = row
+    access_token, expires_at, updated_at, saved_user_id = row
     now = datetime.now(timezone.utc)
     is_valid = expires_at > now
     expires_in_minutes = int((expires_at - now).total_seconds() / 60) if is_valid else 0
@@ -91,11 +92,12 @@ def handle_status():
             "expires_at": expires_at.isoformat(),
             "expires_in_minutes": expires_in_minutes,
             "updated_at": updated_at.isoformat(),
+            "user_id": saved_user_id,
         }),
     }
 
 
-def handle_auth(client_id: str, client_secret: str):
+def handle_auth(client_id: str, client_secret: str, user_id=None):
     data = urllib.parse.urlencode({
         "grant_type": "client_credentials",
         "client_id": client_id,
@@ -135,9 +137,9 @@ def handle_auth(client_id: str, client_secret: str):
     cur = conn.cursor()
     cur.execute(f"DELETE FROM {DB_SCHEMA}.avito_tokens")
     cur.execute(
-        f"""INSERT INTO {DB_SCHEMA}.avito_tokens (access_token, expires_at, updated_at)
-            VALUES (%s, %s, %s)""",
-        (access_token, expires_at, datetime.now(timezone.utc)),
+        f"""INSERT INTO {DB_SCHEMA}.avito_tokens (access_token, expires_at, updated_at, user_id)
+            VALUES (%s, %s, %s, %s)""",
+        (access_token, expires_at, datetime.now(timezone.utc), user_id),
     )
     conn.commit()
     cur.close()

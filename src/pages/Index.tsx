@@ -13,6 +13,7 @@ interface AuthStatus {
   expires_in_minutes?: number;
   updated_at?: string;
   message?: string;
+  user_id?: number;
 }
 
 interface AvitoChat {
@@ -80,6 +81,7 @@ export default function Index() {
 
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
+  const [userId, setUserId] = useState("");
   const [authStatus, setAuthStatus] = useState<AuthStatus | null>(null);
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState("");
@@ -101,7 +103,7 @@ export default function Index() {
     try {
       const res = await fetch(AVITO_CHATS_URL);
       const data = await res.json();
-      if (!res.ok) {
+      if (!res.ok || data.error) {
         setChatsError(data.error || "Ошибка загрузки чатов");
         setChats([]);
       } else {
@@ -151,8 +153,8 @@ export default function Index() {
   }, [messages]);
 
   const handleConnect = async () => {
-    if (!clientId.trim() || !clientSecret.trim()) {
-      setAuthError("Введите Client ID и Client Secret");
+    if (!clientId.trim() || !clientSecret.trim() || !userId.trim()) {
+      setAuthError("Введите Client ID, Client Secret и User ID");
       return;
     }
     setAuthLoading(true);
@@ -162,13 +164,18 @@ export default function Index() {
       const res = await fetch(AVITO_AUTH_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ client_id: clientId.trim(), client_secret: clientSecret.trim() }),
+        body: JSON.stringify({
+          client_id: clientId.trim(),
+          client_secret: clientSecret.trim(),
+          user_id: parseInt(userId.trim(), 10) || userId.trim(),
+        }),
       });
       const data = await res.json();
       if (data.success) {
         setAuthSuccess(`Подключено! Токен действует ${data.expires_in_minutes} минут`);
         setClientId("");
         setClientSecret("");
+        setUserId("");
         await fetchAuthStatus();
       } else {
         setAuthError(data.error || "Ошибка подключения");
@@ -650,6 +657,13 @@ export default function Index() {
                   </div>
                 )}
 
+                {authStatus?.connected && authStatus.user_id && (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground mb-4 bg-secondary px-3 py-2 rounded-lg">
+                    <Icon name="User" size={12} />
+                    User ID: <span className="font-mono font-medium text-foreground">{authStatus.user_id}</span>
+                  </div>
+                )}
+
                 <div className="space-y-3">
                   <div>
                     <label className="text-xs text-muted-foreground mb-1.5 block">Client ID</label>
@@ -667,6 +681,18 @@ export default function Index() {
                       placeholder="Секретный ключ приложения"
                       value={clientSecret}
                       onChange={(e) => { setClientSecret(e.target.value); setAuthError(""); setAuthSuccess(""); }}
+                      className="bg-secondary border-0 focus-visible:ring-1 text-sm font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1.5 block">
+                      User ID{" "}
+                      <span className="text-muted-foreground/60">(номер профиля Avito)</span>
+                    </label>
+                    <Input
+                      placeholder="Например: 123456789"
+                      value={userId}
+                      onChange={(e) => { setUserId(e.target.value); setAuthError(""); setAuthSuccess(""); }}
                       className="bg-secondary border-0 focus-visible:ring-1 text-sm font-mono"
                       onKeyDown={(e) => { if (e.key === "Enter") handleConnect(); }}
                     />
@@ -705,15 +731,11 @@ export default function Index() {
                 </div>
 
                 <p className="text-xs text-muted-foreground mt-4 leading-relaxed">
-                  Ключи берутся в{" "}
-                  <a
-                    href="https://www.avito.ru/professionals/api"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="underline hover:text-foreground transition-colors"
-                  >
+                  Client ID и Client Secret — в{" "}
+                  <a href="https://www.avito.ru/professionals/api" target="_blank" rel="noreferrer" className="underline hover:text-foreground transition-colors">
                     личном кабинете Avito → API
                   </a>
+                  . User ID — числовой номер вашего профиля (виден в URL страницы объявлений или в личном кабинете).
                 </p>
               </div>
 

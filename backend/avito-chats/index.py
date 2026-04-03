@@ -21,22 +21,24 @@ def cors_headers():
     }
 
 
-def get_token():
+def get_token_and_user_id():
     conn = psycopg2.connect(os.environ["DATABASE_URL"])
     cur = conn.cursor()
     cur.execute(
-        f"SELECT access_token, expires_at FROM {DB_SCHEMA}.avito_tokens ORDER BY id DESC LIMIT 1"
+        f"SELECT access_token, expires_at, user_id FROM {DB_SCHEMA}.avito_tokens ORDER BY id DESC LIMIT 1"
     )
     row = cur.fetchone()
     cur.close()
     conn.close()
     if not row:
-        return None, "Токен не найден. Подключите Avito в Настройках."
-    access_token, expires_at = row
+        return None, None, "Токен не найден. Подключите Avito в Настройках."
+    access_token, expires_at, user_id = row
     now = datetime.now(timezone.utc)
     if expires_at <= now:
-        return None, "Токен истёк. Переподключите Avito в Настройках."
-    return access_token, None
+        return None, None, "Токен истёк. Переподключите Avito в Настройках."
+    if not user_id:
+        return None, None, "ID пользователя не указан. Переподключите Avito с указанием User ID."
+    return access_token, user_id, None
 
 
 def avito_get(path: str, token: str):
@@ -52,30 +54,15 @@ def handler(event: dict, context) -> dict:
     if event.get("httpMethod") == "OPTIONS":
         return {"statusCode": 200, "headers": cors_headers(), "body": ""}
 
-    token, err = get_token()
+    token, user_id, err = get_token_and_user_id()
     if err:
         return {
-            "statusCode": 401,
+            "statusCode": 200,
             "headers": {**cors_headers(), "Content-Type": "application/json"},
             "body": json.dumps({"error": err}),
         }
 
-    try:
-        user_info = avito_get("/core/v1/accounts/self", token)
-        user_id = user_info.get("id")
-        if not user_id:
-            return {
-                "statusCode": 502,
-                "headers": {**cors_headers(), "Content-Type": "application/json"},
-                "body": json.dumps({"error": "Не удалось получить ID пользователя"}),
-            }
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8")
-        return {
-            "statusCode": e.code,
-            "headers": {**cors_headers(), "Content-Type": "application/json"},
-            "body": json.dumps({"error": f"Ошибка профиля Avito: {e.code}", "detail": body}),
-        }
+    print(f"[avito-chats] using user_id={user_id}")
 
     params = event.get("queryStringParameters") or {}
     limit = params.get("limit", "50")
@@ -90,13 +77,23 @@ def handler(event: dict, context) -> dict:
         path += "&unread_only=true"
 
     try:
+        print(f"[avito-chats] fetching chats path={path}")
         data = avito_get(path, token)
+        print(f"[avito-chats] chats response keys={list(data.keys())}")
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8")
+        print(f"[avito-chats] chats error {e.code}: {body}")
         return {
-            "statusCode": e.code,
+            "statusCode": 200,
             "headers": {**cors_headers(), "Content-Type": "application/json"},
             "body": json.dumps({"error": f"Ошибка Avito API: {e.code}", "detail": body}),
+        }
+    except Exception as e:
+        print(f"[avito-chats] chats unexpected: {e}")
+        return {
+            "statusCode": 200,
+            "headers": {**cors_headers(), "Content-Type": "application/json"},
+            "body": json.dumps({"error": f"Неожиданная ошибка: {str(e)}"}),
         }
 
     chats = data.get("chats", [])
